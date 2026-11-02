@@ -56,6 +56,10 @@ const main = async (): Promise<void> => {
     subject,
   );
 
+  if (channels.length === 0) {
+    throw new Error("Telegram 和邮件都没有配置，没有任何渠道可推送。请检查 GitHub Secrets 名称是否正确");
+  }
+
   const results = await Promise.allSettled(channels.map(runChannel));
   const failures = results
     .filter((result): result is PromiseRejectedResult => result.status === "rejected")
