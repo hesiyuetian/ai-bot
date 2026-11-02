@@ -12,12 +12,12 @@ GitHub 没有 Trending 官方 API，所以脚本解析 Trending 页面（约 25 
 | Secret | 说明 |
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | 找 [@BotFather](https://t.me/BotFather) 发 `/newbot` 拿到 |
-| `TELEGRAM_CHAT_ID` | 先给你的 bot 发一条消息，然后打开 `https://api.telegram.org/bot<TOKEN>/getUpdates`，看 `chat.id` |
+| `TELEGRAM_CHAT_ID` | 多人用英文逗号分隔，如 `121321,4345345`。获取方式：先给你的 bot 发一条消息，然后打开 `https://api.telegram.org/bot<TOKEN>/getUpdates`，看 `chat.id` |
 | `SMTP_HOST` | Gmail: `smtp.gmail.com` · QQ 邮箱: `smtp.qq.com` · 163: `smtp.163.com` |
 | `SMTP_PORT` | 可不填，默认 `465` (SSL) |
 | `SMTP_USER` | 发件邮箱地址 |
 | `SMTP_PASS` | **不是登录密码**：Gmail 用「应用专用密码」，QQ/163 用「SMTP 授权码」 |
-| `MAIL_TO` | 收件地址，多个用英文逗号分隔 |
+| `MAIL_TO` | 收件地址，多个用英文逗号分隔，每人单独发一封（互相看不到对方地址） |
 
 3. 打开 **Actions** 标签 → 选「GitHub 今日涨星推送」→ **Run workflow** 手动跑一次，确认收到。之后每天自动执行。
 

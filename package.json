@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "dry-run": "node src/main.ts --dry-run",
-    "test": "node --test test/trending.test.ts"
+    "test": "node --test test/trending.test.ts test/list.test.ts"
   },
   "dependencies": {
     "nodemailer": "^6.9.16"
