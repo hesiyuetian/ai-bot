@@ -24,7 +24,10 @@ export const todayInShanghai = (): string =>
     day: "2-digit",
   }).format(new Date());
 
-const describe = (repo: TrendingRepo): string => repo.description || "（暂无说明）";
+const describe = (repo: TrendingRepo): string => repo.descriptionZh || repo.description || "（暂无说明）";
+
+const originalIfTranslated = (repo: TrendingRepo): string =>
+  repo.descriptionZh && repo.descriptionZh !== repo.description ? repo.description : "";
 
 export const toTelegramHtml = (repos: readonly TrendingRepo[], date: string): string => {
   const items = repos.map((repo, index) => {
@@ -48,6 +51,7 @@ export const toEmailHtml = (repos: readonly TrendingRepo[], date: string): strin
       <td style="padding:12px 8px;border-bottom:1px solid #eee">
         <a href="${repo.url}" style="font-size:16px;font-weight:600;color:#0969da;text-decoration:none">${escapeHtml(repo.fullName)}</a>
         <div style="margin:6px 0;color:#333;line-height:1.5">${escapeHtml(describe(repo))}</div>
+        ${originalIfTranslated(repo) ? `<div style="margin:0 0 6px;color:#999;font-size:12px;line-height:1.4">${escapeHtml(originalIfTranslated(repo))}</div>` : ""}
         <div style="font-size:12px;color:#666">
           ${repo.language ? `${escapeHtml(repo.language)} · ` : ""}⭐ ${formatCount(repo.totalStars)} ·
           <a href="${repo.url}" style="color:#666">${repo.url}</a>

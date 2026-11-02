@@ -39,6 +39,7 @@ npm test
 
 - 推送时间：改 `.github/workflows/daily.yml` 里的 cron（UTC 时间，北京时间减 8 小时）。
 - 数量：加一个 `TOP_COUNT` 环境变量。
+- 翻译：英文说明默认用 Google 翻译成中文（免 key，失败时保留原文）。邮件里中文下方附原文。设 `TRANSLATE=false` 可关闭。
 
 ## 注意
 

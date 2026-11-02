@@ -1,6 +1,7 @@
 import { toEmailHtml, toPlainText, todayInShanghai, toTelegramHtml } from "./format.ts";
 import { sendEmail, sendTelegram } from "./notify.ts";
-import { fetchTopByStarsToday } from "./trending.ts";
+import { fetchTopByStarsToday, type TrendingRepo } from "./trending.ts";
+import { translateToChinese } from "./translate.ts";
 
 const DEFAULT_TOP_COUNT = 10;
 const DEFAULT_SMTP_PORT = 465;
@@ -42,8 +43,14 @@ const buildChannels = (html: { telegram: string; email: string; text: string }, 
   return channels;
 };
 
+const withChineseDescription = async (repo: TrendingRepo): Promise<TrendingRepo> => ({
+  ...repo,
+  descriptionZh: await translateToChinese(repo.description),
+});
+
 const main = async (): Promise<void> => {
-  const repos = await fetchTopByStarsToday(Number(env("TOP_COUNT") ?? DEFAULT_TOP_COUNT));
+  const trending = await fetchTopByStarsToday(Number(env("TOP_COUNT") ?? DEFAULT_TOP_COUNT));
+  const repos = env("TRANSLATE") === "false" ? trending : await Promise.all(trending.map(withChineseDescription));
   const date = todayInShanghai();
   const text = toPlainText(repos, date);
   console.log(text);

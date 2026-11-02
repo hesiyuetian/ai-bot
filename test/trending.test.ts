@@ -63,3 +63,13 @@ test("formatters escape HTML and include url + stars today", () => {
   assert.ok(telegram.includes("https://github.com/beta/two"));
   assert.ok(toEmailHtml(repos, "2026/11/02").includes("（暂无说明）"));
 });
+
+test("shows the Chinese description and keeps the original in email", () => {
+  const [repo] = parseTrending(fixture);
+  assert.ok(repo);
+  const translated = { ...repo, descriptionZh: "快速工具" };
+  assert.ok(toTelegramHtml([translated], "2026/11/02").includes("快速工具"));
+  const email = toEmailHtml([translated], "2026/11/02");
+  assert.ok(email.includes("快速工具"));
+  assert.ok(email.includes("A &amp; B &lt;fast&gt; tool"));
+});

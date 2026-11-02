@@ -2,6 +2,7 @@ export type TrendingRepo = {
   readonly fullName: string;
   readonly url: string;
   readonly description: string;
+  readonly descriptionZh?: string;
   readonly language: string;
   readonly totalStars: number;
   readonly starsToday: number;
