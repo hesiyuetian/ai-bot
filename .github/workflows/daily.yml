@@ -1,0 +1,28 @@
+name: GitHub 今日涨星推送
+
+on:
+  schedule:
+    # 每天 22:00 北京时间 (= 14:00 UTC)。Actions 定时任务高峰期可能延迟几分钟到几十分钟。
+    - cron: "0 14 * * *"
+  workflow_dispatch: # 支持在 Actions 页面手动点 "Run workflow" 测试
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: npm test
+      - run: npm start
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
