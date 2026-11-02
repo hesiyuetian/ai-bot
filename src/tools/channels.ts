@@ -1,3 +1,4 @@
+import { describeError } from "./async.ts";
 import { splitList } from "./list.ts";
 import { sendEmail, sendTelegram } from "./notify.ts";
 
@@ -84,7 +85,7 @@ export const runMain = async (main: () => Promise<void>): Promise<void> => {
   try {
     await main();
   } catch (error: unknown) {
-    console.error("❌", error instanceof Error ? error.message : error);
+    console.error("❌", describeError(error));
     process.exit(1);
   }
 };

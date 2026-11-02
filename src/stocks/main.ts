@@ -1,21 +1,18 @@
+import { sleep } from "../tools/async.ts";
 import { env, pushToAll, runMain } from "../tools/channels.ts";
 import { shanghaiDate, shanghaiInstant, todayInShanghai } from "../tools/time.ts";
 import { toStockEmailHtml, toStockPlainText, toStockTelegramHtml } from "./format.ts";
-import { fetchIndustryFlows, fetchTopInflowStocks } from "./quotes.ts";
+import { fetchMarketSnapshot } from "./quotes.ts";
 import { screenStocks } from "./screener.ts";
 import { fetchOffDays, isTradingDay } from "./trading-calendar.ts";
 
 const DEFAULT_STOCK_COUNT = 10;
 const DEFAULT_PUSH_TIME = "09:20";
-/** 2 pages × 100 = the 200 stocks with the largest main-capital inflow; plenty of candidates for 10 picks. */
-const CANDIDATE_PAGES = 2;
 const YEAR_LENGTH = 4;
 const MS_PER_SECOND = 1000;
 
 const isDryRun = process.argv.includes("--dry-run");
 const skipsCalendar = isDryRun || process.argv.includes("--force");
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Actions starts the job early (cron delays are common), so the screen runs on the previous session's
@@ -35,15 +32,13 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  // Sequential on purpose: parallel requests trip Eastmoney's rate limit.
-  const quotes = await fetchTopInflowStocks(CANDIDATE_PAGES);
-  const industries = await fetchIndustryFlows();
-  const picks = screenStocks(quotes, industries, Number(env("STOCK_COUNT") ?? DEFAULT_STOCK_COUNT));
+  const snapshot = await fetchMarketSnapshot();
+  const picks = screenStocks(snapshot.quotes, snapshot.industries, Number(env("STOCK_COUNT") ?? DEFAULT_STOCK_COUNT));
   if (picks.length === 0) throw new Error("没有筛选出任何股票，行情数据可能不完整");
 
-  const tradeDate = quotes[0]?.tradeDate ?? "";
   const today = todayInShanghai();
-  const text = toStockPlainText(picks, today, tradeDate);
+  const meta = { tradeDate: snapshot.quotes[0]?.tradeDate ?? "", source: snapshot.source };
+  const text = toStockPlainText(picks, today, meta);
   console.log(text);
 
   if (isDryRun) return;
@@ -51,8 +46,8 @@ const main = async (): Promise<void> => {
   await waitUntilPushTime(date);
   await pushToAll({
     subject: `📊 今日潜力股 Top ${picks.length} · ${today}`,
-    telegram: toStockTelegramHtml(picks, today, tradeDate),
-    email: toStockEmailHtml(picks, today, tradeDate),
+    telegram: toStockTelegramHtml(picks, today, meta),
+    email: toStockEmailHtml(picks, today, meta),
     text,
   });
 };

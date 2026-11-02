@@ -1,4 +1,4 @@
-import type { IndustryFlow, StockQuote } from "./quotes.ts";
+import type { IndustryFlow, StockQuote } from "./types.ts";
 
 export type Recommendation = {
   readonly quote: StockQuote;
@@ -80,6 +80,10 @@ const LOW_PE_BANDS: readonly Band[] = [{ min: 0, max: LOW_PE_MAX, points: LOW_PE
 // Try it: https://regex101.com/?flavor=javascript&regex=ST%7C%E9%80%80&flags=&testString=*ST%20%E4%B8%AD%E5%A4%A9%0A%E9%80%80%E5%B8%82%E6%B5%B7%E8%B6%8A%0A%E4%B8%AD%E5%9B%BD%E5%B9%B3%E5%AE%89
 const RISK_NAME_PATTERN = /ST|退/;
 
+// First-days listings, prefixed N (day one) or C (first five days). Matches "N 海博", "C 新股"; rejects "中国平安".
+// Try it: https://regex101.com/?flavor=javascript&regex=%5E%5BNC%5D&flags=&testString=N%20%E6%B5%B7%E5%8D%9A%0AC%20%E6%96%B0%E8%82%A1%0A%E4%B8%AD%E5%9B%BD%E5%B9%B3%E5%AE%89
+const NEW_LISTING_NAME_PATTERN = /^[NC]/;
+
 // Compact date. Captures "2026", "11", "02" from "20261102"; rejects "2026-11-02".
 // Try it: https://regex101.com/?flavor=javascript&regex=%5E%28%5Cd%7B4%7D%29%28%5Cd%7B2%7D%29%28%5Cd%7B2%7D%29%24&flags=&testString=20261102%0A2026-11-02
 const COMPACT_DATE_PATTERN = /^(\d{4})(\d{2})(\d{2})$/;
@@ -156,6 +160,8 @@ const hasCompleteData = (quote: StockQuote): boolean =>
 export const isEligible = (quote: StockQuote): boolean =>
   hasCompleteData(quote) &&
   !RISK_NAME_PATTERN.test(quote.name) &&
+  // Sources without listing dates still mark first-days listings in the name.
+  !NEW_LISTING_NAME_PATTERN.test(quote.name) &&
   // Unknown listing dates yield NaN and pass; new listings are the ones to drop.
   !(listedDays(quote) < MIN_LISTED_DAYS) &&
   quote.price >= MIN_PRICE &&

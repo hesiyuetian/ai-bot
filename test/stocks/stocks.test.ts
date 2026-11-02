@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DISCLAIMER, toStockEmailHtml, toStockTelegramHtml } from "../../src/stocks/format.ts";
-import { parseStockRow, type StockQuote } from "../../src/stocks/quotes.ts";
+import { parseStockRow } from "../../src/stocks/sources/eastmoney.ts";
+import { mergeQuotes, parseTencentQuotes, type MainFlow } from "../../src/stocks/sources/sina-tencent.ts";
+import type { StockQuote } from "../../src/stocks/types.ts";
+import { describeError } from "../../src/tools/async.ts";
 import { isEligible, screenStocks } from "../../src/stocks/screener.ts";
 import { shanghaiDate } from "../../src/tools/time.ts";
 import { isTradingDay } from "../../src/stocks/trading-calendar.ts";
@@ -47,9 +50,50 @@ test("parses an Eastmoney row, treating '-' as missing", () => {
   assert.equal(parseStockRow({ f12: "688981", f13: 1 }).url, "https://quote.eastmoney.com/sh688981.html");
 });
 
+// Real Tencent quotes trimmed to the fields the parser reads: one stock, one ETF, one symbol Sina never ranked.
+const TENCENT_FIELD_COUNT = 72;
+const tencentLine = (symbol: string, values: Readonly<Record<number, string>>): string =>
+  `v_${symbol}="${Array.from({ length: TENCENT_FIELD_COUNT }, (_, index) => values[index] ?? "").join("~")}";`;
+const TENCENT_TEXT = [
+  tencentLine("sz300059", JSON.parse(`{"1":"东方财富","2":"300059","3":"18.71","30":"20261102161430","32":"6.31",
+    "37":"864560","38":"3.47","39":"19.88","45":"2960.33","49":"2.61","61":"GP-A-CYB","63":"0.86","71":"-7.24"}`)),
+  tencentLine("sh512100", JSON.parse(`{"1":"中证1000ETF","2":"512100","61":"ETF"}`)),
+  tencentLine("sh600000", JSON.parse(`{"1":"浦发银行","2":"600000","61":"GP-A"}`)),
+].join("\n");
+const SINA_FLOWS: ReadonlyMap<string, MainFlow> = new Map(JSON.parse(`[
+  ["sz300059", {"netInflow": 1385328781, "netPct": 16.02}],
+  ["sh512100", {"netInflow": 1948263293, "netPct": 20.35}]
+]`));
+const TENCENT_AMOUNT = 8_645_600_000;
+const TENCENT_MARKET_CAP = 296_033_000_000;
+const TENCENT_VOLUME_RATIO = 2.61;
+const TENCENT_CHANGE_60D = -7.24;
+const SINA_NET_PCT = 16.02;
+
+test("merges Sina flows with Tencent quotes, keeping stocks only", () => {
+  const [merged, ...rest] = mergeQuotes(SINA_FLOWS, parseTencentQuotes(TENCENT_TEXT));
+  assert.equal(rest.length, 0);
+  assert.equal(merged?.name, "东方财富");
+  assert.equal(merged?.url, "https://quote.eastmoney.com/sz300059.html");
+  assert.equal(merged?.amount, TENCENT_AMOUNT);
+  assert.equal(merged?.marketCap, TENCENT_MARKET_CAP);
+  assert.equal(merged?.volumeRatio, TENCENT_VOLUME_RATIO);
+  assert.equal(merged?.change60dPct, TENCENT_CHANGE_60D);
+  assert.equal(merged?.mainNetPct, SINA_NET_PCT);
+  assert.equal(merged?.tradeDate, "20261102");
+  assert.equal(merged?.industry, "");
+});
+
+test("error descriptions include the network cause", () => {
+  const cause = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+  assert.equal(describeError(new Error("fetch failed", { cause })), "fetch failed (UND_ERR_SOCKET)");
+  assert.equal(describeError(new Error("HTTP 500")), "HTTP 500");
+});
+
 test("filters out ST, new, near-limit-up, illiquid and loss-making stocks", () => {
   assert.ok(isEligible(quote()));
   assert.ok(!isEligible(quote({ name: "*ST 中天" })));
+  assert.ok(!isEligible(quote({ name: "N 海博", listDate: "" })));
   assert.ok(!isEligible(quote({ listDate: "20260901" })));
   assert.ok(!isEligible(quote({ changePct: LIMIT_UP_PCT })));
   assert.ok(!isEligible(quote({ changePct: -1 })));
@@ -82,11 +126,12 @@ test("flags oversold rebounds as a risk", () => {
 
 test("formatters escape HTML and carry reasons and the disclaimer", () => {
   const picks = screenStocks([quote({ name: "A&B" })], [], PICK_LIMIT);
-  const telegram = toStockTelegramHtml(picks, "2026/11/02", "20261030");
+  const meta = { tradeDate: "20261030", source: "新浪财经 + 腾讯行情" };
+  const telegram = toStockTelegramHtml(picks, "2026/11/02", meta);
   assert.ok(telegram.includes("A&amp;B"));
   assert.ok(telegram.includes("• 主力资金净流入"));
   assert.ok(telegram.includes(DISCLAIMER));
-  assert.ok(toStockEmailHtml(picks, "2026/11/02", "20261030").includes("数据基于 20261030 收盘"));
+  assert.ok(toStockEmailHtml(picks, "2026/11/02", meta).includes("数据基于 20261030 收盘 · 来源 新浪财经 + 腾讯行情"));
 });
 
 test("trading days are weekdays that are not public holidays", () => {
