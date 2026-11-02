@@ -1,28 +1,12 @@
+import { escapeHtml } from "../tools/html.ts";
 import type { TrendingRepo } from "./trending.ts";
 
 const MAX_TELEGRAM_DESCRIPTION = 200;
-
-const HTML_ESCAPES: Readonly<Record<string, string>> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-
-// Characters unsafe in HTML text/attributes. Matches "<" in "a<b"; rejects "abc".
-// Try it: https://regex101.com/?flavor=javascript&regex=%5B%26%3C%3E%22%5D&flags=g&testString=%3C%0Aa%3Cb%0Aabc
-const UNSAFE_HTML_PATTERN = /[&<>"]/g;
-
-const escapeHtml = (text: string): string =>
-  text.replace(UNSAFE_HTML_PATTERN, (char) => HTML_ESCAPES[char] ?? char);
 
 const truncate = (text: string, max: number): string =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
 const formatCount = (count: number): string => count.toLocaleString("en-US");
-
-export const todayInShanghai = (): string =>
-  new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
 
 const describe = (repo: TrendingRepo): string => repo.descriptionZh || repo.description || "（暂无说明）";
 

@@ -1,0 +1,31 @@
+name: 每日潜力股推送
+
+on:
+  schedule:
+    # 周一到周五 08:30 北京时间 (= 00:30 UTC) 启动，脚本筛选完后等到 09:20 再推送。
+    # 提前启动是为了扛住 Actions 定时任务的延迟，并在 09:15 集合竞价开始前拿到上一交易日的完整数据。
+    # 节假日由脚本自动判断并跳过。
+    - cron: "30 0 * * 1-5"
+  workflow_dispatch: # 手动运行时跳过交易日判断、立即推送，方便测试
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: npm test
+      - run: npm run stocks -- ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+        env:
+          STOCK_PUSH_TIME: ${{ github.event_name == 'workflow_dispatch' && '00:00' || '09:20' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}

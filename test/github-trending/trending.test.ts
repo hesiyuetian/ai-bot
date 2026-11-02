@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { toEmailHtml, toTelegramHtml } from "../src/format.ts";
-import { parseTrending } from "../src/trending.ts";
+import { toEmailHtml, toTelegramHtml } from "../../src/github-trending/format.ts";
+import { parseTrending } from "../../src/github-trending/trending.ts";
 
 const card = (path: string, description: string, language: string, total: string, today: string): string => `
 <article class="Box-row">

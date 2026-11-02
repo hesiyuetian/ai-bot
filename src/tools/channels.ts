@@ -1,13 +1,16 @@
-import { toEmailHtml, toPlainText, todayInShanghai, toTelegramHtml } from "./format.ts";
 import { splitList } from "./list.ts";
 import { sendEmail, sendTelegram } from "./notify.ts";
-import { fetchTopByStarsToday, type TrendingRepo } from "./trending.ts";
-import { translateToChinese } from "./translate.ts";
 
-const DEFAULT_TOP_COUNT = 10;
 const DEFAULT_SMTP_PORT = 465;
 
-const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
+export const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
+
+export type Message = {
+  readonly subject: string;
+  readonly telegram: string;
+  readonly email: string;
+  readonly text: string;
+};
 
 type Channel = {
   readonly name: string;
@@ -27,7 +30,7 @@ const runChannel = async (channel: Channel): Promise<void> => {
 const recipientName = (channel: string, index: number, total: number): string =>
   total > 1 ? `${channel} (${index + 1}/${total})` : channel;
 
-const buildChannels = (html: { telegram: string; email: string; text: string }, subject: string): Channel[] => {
+const buildChannels = (message: Message): Channel[] => {
   const channels: Channel[] = [];
 
   const tgToken = env("TELEGRAM_BOT_TOKEN");
@@ -36,7 +39,7 @@ const buildChannels = (html: { telegram: string; email: string; text: string }, 
     channels.push(
       ...chatIds.map((chatId, index) => ({
         name: recipientName("Telegram", index, chatIds.length),
-        send: () => sendTelegram(tgToken, chatId, html.telegram),
+        send: () => sendTelegram(tgToken, chatId, message.telegram),
       })),
     );
   } else {
@@ -52,7 +55,7 @@ const buildChannels = (html: { telegram: string; email: string; text: string }, 
     channels.push(
       ...recipients.map((to, index) => ({
         name: recipientName("邮件", index, recipients.length),
-        send: () => sendEmail({ host, user, pass, port, to }, subject, html.email, html.text),
+        send: () => sendEmail({ host, user, pass, port, to }, message.subject, message.email, message.text),
       })),
     );
   } else {
@@ -62,26 +65,9 @@ const buildChannels = (html: { telegram: string; email: string; text: string }, 
   return channels;
 };
 
-const withChineseDescription = async (repo: TrendingRepo): Promise<TrendingRepo> => ({
-  ...repo,
-  descriptionZh: await translateToChinese(repo.description),
-});
-
-const main = async (): Promise<void> => {
-  const trending = await fetchTopByStarsToday(Number(env("TOP_COUNT") ?? DEFAULT_TOP_COUNT));
-  const repos = env("TRANSLATE") === "false" ? trending : await Promise.all(trending.map(withChineseDescription));
-  const date = todayInShanghai();
-  const text = toPlainText(repos, date);
-  console.log(text);
-
-  if (process.argv.includes("--dry-run")) return;
-
-  const subject = `📈 GitHub 今日涨星 Top ${repos.length} · ${date}`;
-  const channels = buildChannels(
-    { telegram: toTelegramHtml(repos, date), email: toEmailHtml(repos, date), text },
-    subject,
-  );
-
+/** Sends the message to every configured Telegram chat and mailbox; throws if none is configured or any fails. */
+export const pushToAll = async (message: Message): Promise<void> => {
+  const channels = buildChannels(message);
   if (channels.length === 0) {
     throw new Error("Telegram 和邮件都没有配置，没有任何渠道可推送。请检查 GitHub Secrets 名称是否正确");
   }
@@ -93,9 +79,12 @@ const main = async (): Promise<void> => {
   if (failures.length > 0) throw new Error(failures.join("\n"));
 };
 
-try {
-  await main();
-} catch (error: unknown) {
-  console.error("❌", error instanceof Error ? error.message : error);
-  process.exit(1);
-}
+/** Runs an entry point and turns any thrown error into a logged failure with exit code 1. */
+export const runMain = async (main: () => Promise<void>): Promise<void> => {
+  try {
+    await main();
+  } catch (error: unknown) {
+    console.error("❌", error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+};

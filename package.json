@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "每天推送 GitHub 今日涨星 Top 10 到 Telegram 和邮箱",
+  "description": "每天推送 GitHub 今日涨星 Top 10，交易日早盘推送 10 只潜力股，到 Telegram 和邮箱",
   "engines": { "node": ">=22.18" },
   "scripts": {
-    "start": "node src/main.ts",
-    "dry-run": "node src/main.ts --dry-run",
-    "test": "node --test test/trending.test.ts test/list.test.ts"
+    "start": "node src/github-trending/main.ts",
+    "dry-run": "node src/github-trending/main.ts --dry-run",
+    "stocks": "node src/stocks/main.ts",
+    "stocks:dry-run": "node src/stocks/main.ts --dry-run",
+    "test": "node --test \"test/**/*.test.ts\""
   },
   "dependencies": {
     "nodemailer": "^6.9.16"
