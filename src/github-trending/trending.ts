@@ -1,3 +1,5 @@
+import { htmlToText } from "../tools/html.ts";
+
 export type TrendingRepo = {
   readonly fullName: string;
   readonly url: string;
@@ -9,27 +11,6 @@ export type TrendingRepo = {
 };
 
 const TRENDING_URL = "https://github.com/trending?since=daily";
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
-// HTML entity: named, decimal or hex. Matches "&amp;", "&#39;", "&#x2F;"; rejects "& amp;".
-// Try it: https://regex101.com/?flavor=javascript&regex=%26%28%23x%5B0-9a-f%5D%2B%7C%23%5Cd%2B%7C%5Ba-z%5D%2B%29%3B&flags=gi&testString=%26amp%3B%0A%26%2339%3B%0A%26%23x2F%3B%0A%26%20amp%3B
-const ENTITY_PATTERN = /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi;
-
-// Any HTML tag. Matches "<span class=\"a\">", "</p>"; rejects "a < b".
-// Try it: https://regex101.com/?flavor=javascript&regex=%3C%5B%5E%3E%5Cs%5D%5B%5E%3E%5D%2A%3E&flags=g&testString=%3Cspan%20class%3D%22a%22%3E%0A%3C%2Fp%3E%0Aa%20%3C%20b
-const TAG_PATTERN = /<[^>\s][^>]*>/g;
-
-// Runs of whitespace. Matches "  \n  "; rejects "a".
-// Try it: https://regex101.com/?flavor=javascript&regex=%5Cs%2B&flags=g&testString=%20%20%5Cn%20%20%0Aa
-const WHITESPACE_PATTERN = /\s+/g;
 
 // Anything that is not a digit. Matches "," in "12,345"; rejects "7".
 // Try it: https://regex101.com/?flavor=javascript&regex=%5CD&flags=g&testString=%2C%0A12%2C345%0A7
@@ -59,20 +40,6 @@ const TOTAL_STARS_PATTERN = /href="\/[^"]+\/stargazers"[^>]*>([\s\S]*?)<\/a>/;
 // Try it: https://regex101.com/?flavor=javascript&regex=%28%5B%5Cd%2C%5D%2B%29%5Cs%2Bstars%3F%5Cs%2Btoday&flags=&testString=1%2C234%0A1%2C234%20stars%20today%0A1%2C234%20stars%20this%20week
 const STARS_TODAY_PATTERN = /([\d,]+)\s+stars?\s+today/;
 
-const HEX_PREFIX = "#x";
-const HEX_RADIX = 16;
-
-const decodeEntity = (entity: string, body: string): string => {
-  if (body.startsWith(HEX_PREFIX) || body.startsWith(HEX_PREFIX.toUpperCase())) {
-    return String.fromCodePoint(parseInt(body.slice(HEX_PREFIX.length), HEX_RADIX));
-  }
-  if (body.startsWith("#")) return String.fromCodePoint(Number(body.slice(1)));
-  return NAMED_ENTITIES[body.toLowerCase()] ?? entity;
-};
-
-const toText = (html: string): string =>
-  html.replace(TAG_PATTERN, "").replace(ENTITY_PATTERN, decodeEntity).replace(WHITESPACE_PATTERN, " ").trim();
-
 const toNumber = (text: string): number => Number(text.replace(NON_DIGIT_PATTERN, "")) || 0;
 
 const parseArticle = (article: string): TrendingRepo | undefined => {
@@ -82,9 +49,9 @@ const parseArticle = (article: string): TrendingRepo | undefined => {
   return {
     fullName: path,
     url: `https://github.com/${path}`,
-    description: toText(article.match(DESCRIPTION_PATTERN)?.[1] ?? ""),
-    language: toText(article.match(LANGUAGE_PATTERN)?.[1] ?? ""),
-    totalStars: toNumber(toText(article.match(TOTAL_STARS_PATTERN)?.[1] ?? "")),
+    description: htmlToText(article.match(DESCRIPTION_PATTERN)?.[1] ?? ""),
+    language: htmlToText(article.match(LANGUAGE_PATTERN)?.[1] ?? ""),
+    totalStars: toNumber(htmlToText(article.match(TOTAL_STARS_PATTERN)?.[1] ?? "")),
     starsToday: toNumber(article.match(STARS_TODAY_PATTERN)?.[1] ?? ""),
   };
 };

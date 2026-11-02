@@ -2,7 +2,7 @@ import { env, pushToAll, runMain } from "../tools/channels.ts";
 import { todayInShanghai } from "../tools/time.ts";
 import { toEmailHtml, toPlainText, toTelegramHtml } from "./format.ts";
 import { fetchTopByStarsToday, type TrendingRepo } from "./trending.ts";
-import { translateToChinese } from "./translate.ts";
+import { translateToChinese } from "../tools/translate.ts";
 
 const DEFAULT_TOP_COUNT = 10;
 

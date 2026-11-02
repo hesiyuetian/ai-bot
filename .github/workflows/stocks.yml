@@ -22,6 +22,13 @@ jobs:
       - run: npm run stocks -- ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
         env:
           STOCK_PUSH_TIME: ${{ github.event_name == 'workflow_dispatch' && '00:00' || '09:20' }}
+          # 可选：配了任意一个就由 AI 从量化初选的 30 只中精选 10 只并点评，都没配则按量化得分选。
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

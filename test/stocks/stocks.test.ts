@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { parseSelection, selectPicks } from "../../src/stocks/analyze.ts";
 import { DISCLAIMER, toStockEmailHtml, toStockTelegramHtml } from "../../src/stocks/format.ts";
 import { parseStockRow } from "../../src/stocks/sources/eastmoney.ts";
 import { mergeQuotes, parseTencentQuotes, type MainFlow } from "../../src/stocks/sources/sina-tencent.ts";
 import type { StockQuote } from "../../src/stocks/types.ts";
 import { describeError } from "../../src/tools/async.ts";
+import type { LlmProvider } from "../../src/tools/llm.ts";
 import { isEligible, screenStocks } from "../../src/stocks/screener.ts";
 import { shanghaiDate } from "../../src/tools/time.ts";
 import { isTradingDay } from "../../src/stocks/trading-calendar.ts";
@@ -144,4 +146,91 @@ test("trading days are weekdays that are not public holidays", () => {
 
 test("uses Beijing time for today's date", () => {
   assert.equal(shanghaiDate(new Date("2026-11-01T17:00:00Z")), "2026-11-02");
+});
+
+const TELEGRAM_LIMIT = 4096;
+const LONG_TEXT_CHARS = 500;
+const MAX_ANALYSIS_CHARS = 90;
+const POOL_SIZE = 30;
+const TOO_FEW_ANSWERS = 2;
+const AI_CHOSEN = 7;
+const CODE_SUFFIX_DIGITS = 2;
+
+// Any HTML tag, to measure what Telegram displays. Matches "<b>", "</a>"; rejects "a < b".
+// Try it: https://regex101.com/?flavor=javascript&regex=%3C%5B%5E%3E%5D%2B%3E&flags=g&testString=%3Cb%3E%0A%3C%2Fa%3E%0Aa%20%3C%20b
+const TAG_PATTERN = /<[^>]+>/g;
+
+// A rule-screened pool, one stock per industry so diversification keeps them all, best score first.
+const rulePool = () =>
+  screenStocks(
+    Array.from({ length: POOL_SIZE }, (_, index) =>
+      quote({ code: `6000${String(index).padStart(CODE_SUFFIX_DIGITS, "0")}`, name: `股票${index}`, industry: `行业${index}` }),
+    ),
+    [],
+    POOL_SIZE,
+  );
+
+const answerFor = (codes: readonly string[], reason: string, market = "市场观察"): string =>
+  "```json\n" + JSON.stringify({ market, picks: codes.map((code) => ({ code, reason })) }) + "\n```";
+
+const codesOf = (picks: readonly { readonly quote: StockQuote }[]): string[] => picks.map((pick) => pick.quote.code);
+
+test("AI picks come from the pool in the AI's order; invented codes are dropped", () => {
+  const pool = rulePool();
+  const fromBottom = codesOf(pool).reverse().slice(0, PICK_LIMIT);
+  const selection = parseSelection(answerFor(["999999", ...fromBottom], "很长".repeat(LONG_TEXT_CHARS)), pool, PICK_LIMIT);
+  assert.deepEqual(codesOf(selection.picks), fromBottom);
+  assert.ok(!selection.byCode.has("999999"));
+  assert.equal(selection.byCode.get(fromBottom[0] ?? "")?.length, MAX_ANALYSIS_CHARS);
+});
+
+test("a short AI answer is topped up from the rule ranking; an unusable one throws", () => {
+  const pool = rulePool();
+  const chosen = codesOf(pool).reverse().slice(0, AI_CHOSEN);
+  const selection = parseSelection(answerFor(chosen, "理由"), pool, PICK_LIMIT);
+  assert.equal(selection.picks.length, PICK_LIMIT);
+  assert.deepEqual(codesOf(selection.picks).slice(0, AI_CHOSEN), chosen);
+  assert.deepEqual(codesOf(selection.picks).slice(AI_CHOSEN), codesOf(pool).slice(0, PICK_LIMIT - AI_CHOSEN));
+  assert.throws(() => parseSelection(answerFor(chosen.slice(0, TOO_FEW_ANSWERS), "太少"), pool, PICK_LIMIT));
+  assert.throws(() => parseSelection("无法分析", pool, PICK_LIMIT));
+});
+
+test("selection falls back across providers, then to the rule ranking", async () => {
+  const pool = rulePool();
+  const aiCodes = codesOf(pool).reverse().slice(0, PICK_LIMIT);
+  const failing: LlmProvider = { name: "Claude (test)", complete: () => Promise.reject(new Error("overloaded")) };
+  const working: LlmProvider = { name: "ChatGPT (test)", complete: () => Promise.resolve(answerFor(aiCodes, "资金持续流入")) };
+
+  const byAi = await selectPicks(pool, [], "20261102", PICK_LIMIT, [failing, working]);
+  assert.equal(byAi.analysis?.author, "ChatGPT (test)");
+  assert.equal(byAi.analysis?.poolSize, POOL_SIZE);
+  assert.deepEqual(codesOf(byAi.picks), aiCodes);
+
+  const ruleTop = codesOf(pool).slice(0, PICK_LIMIT);
+  const withoutAi = await selectPicks(pool, [], "20261102", PICK_LIMIT, []);
+  assert.equal(withoutAi.analysis, undefined);
+  assert.deepEqual(codesOf(withoutAi.picks), ruleTop);
+  assert.deepEqual(codesOf((await selectPicks(pool, [], "20261102", PICK_LIMIT, [failing])).picks), ruleTop);
+});
+
+test("push shows how stocks were chosen and stays under Telegram's limit at maximum length", () => {
+  const pool = rulePool();
+  const parsed = parseSelection(
+    answerFor(codesOf(pool).slice(0, PICK_LIMIT), "长".repeat(LONG_TEXT_CHARS), "观".repeat(LONG_TEXT_CHARS)),
+    pool,
+    PICK_LIMIT,
+  );
+  const analysis = { market: parsed.market, byCode: parsed.byCode, poolSize: POOL_SIZE, author: "Claude (test)" };
+  const meta = { tradeDate: "20261102", source: "东方财富" };
+
+  const telegram = toStockTelegramHtml(parsed.picks, "2026/11/03", meta, analysis);
+  const visible = telegram.replace(TAG_PATTERN, "");
+  assert.ok(visible.length < TELEGRAM_LIMIT, `visible length ${visible.length}`);
+  assert.ok(telegram.includes("AI 从 30 只量化初选股中精选"));
+  assert.ok(telegram.includes("🤖 AI 市场观察（Claude (test)）"));
+  assert.ok(telegram.includes("🤖 AI：长长"));
+  assert.ok(toStockEmailHtml(parsed.picks, "2026/11/03", meta, analysis).includes("AI 市场观察"));
+  const ruleOnly = toStockTelegramHtml(parsed.picks, "2026/11/03", meta);
+  assert.ok(ruleOnly.includes("按量化得分选出"));
+  assert.ok(!ruleOnly.includes("🤖"));
 });

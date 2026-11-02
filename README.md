@@ -4,7 +4,10 @@
 
 GitHub 没有 Trending 官方 API，所以脚本解析 Trending 页面（约 25 个仓库），再按 "stars today" 重新排序。
 
-另外，每个 **A 股交易日北京时间 09:20** 推送 10 只当日潜力股，每只附推荐理由（见下方「每日潜力股」）。两个任务共用同一套 Telegram / 邮箱配置。
+另外还有两个推送，三个任务共用同一套 Telegram / 邮箱配置：
+
+- **每天北京时间 08:00**：AI 圈过去 24 小时的 10 条要闻，用 Claude 或 ChatGPT 挑选和写中文摘要（见下方「AI 圈每日要闻」）。
+- **每个 A 股交易日北京时间 09:20**：10 只当日潜力股，每只附推荐理由，可选 AI 选股和点评（见下方「每日潜力股」）。
 
 ## 部署（GitHub Actions）
 
@@ -20,8 +23,10 @@ GitHub 没有 Trending 官方 API，所以脚本解析 Trending 页面（约 25 
 | `SMTP_USER` | 发件邮箱地址 |
 | `SMTP_PASS` | **不是登录密码**：Gmail 用「应用专用密码」，QQ/163 用「SMTP 授权码」 |
 | `MAIL_TO` | 收件地址，多个用英文逗号分隔，每人单独发一封（互相看不到对方地址） |
+| `ANTHROPIC_API_KEY` | 可选，AI 要闻和潜力股 AI 选股用 Claude。在 [Claude Console](https://platform.claude.com) 创建，按用量单独计费，和 Claude Pro 订阅无关 |
+| `OPENAI_API_KEY` | 可选，AI 要闻和潜力股 AI 选股用 ChatGPT。在 [OpenAI Platform](https://platform.openai.com) 创建，同样和 ChatGPT Plus 订阅无关 |
 
-3. 打开 **Actions** 标签 → 选「GitHub 今日涨星推送」→ **Run workflow** 手动跑一次，确认收到。之后每天自动执行。「每日潜力股推送」同理，手动运行时会跳过交易日判断并立即推送。
+3. 打开 **Actions** 标签 → 选「GitHub 今日涨星推送」→ **Run workflow** 手动跑一次，确认收到。之后每天自动执行。「AI 圈每日要闻推送」「每日潜力股推送」同理，潜力股手动运行时会跳过交易日判断并立即推送。
 
 只配了 Telegram 或只配了邮箱也可以，没配的渠道会自动跳过。
 
@@ -33,6 +38,7 @@ GitHub 没有 Trending 官方 API，所以脚本解析 Trending 页面（约 25 
 npm install
 npm run dry-run        # 只打印榜单，不推送
 npm run stocks:dry-run # 只打印潜力股，不推送
+npm run ai-news:dry-run # 只打印 AI 要闻，不推送
 cp .env.example .env   # 填好变量后：
 node --env-file=.env src/github-trending/main.ts
 npm test
@@ -42,7 +48,34 @@ npm test
 
 - 推送时间：改 `.github/workflows/daily.yml` 里的 cron（UTC 时间，北京时间减 8 小时）。
 - 数量：加一个 `TOP_COUNT` 环境变量。
-- 翻译：英文说明默认用 Google 翻译成中文（免 key，失败时保留原文）。邮件里中文下方附原文。设 `TRANSLATE=false` 可关闭。
+- 翻译：英文说明默认用 Google 翻译成中文（免 key，失败时保留原文；被限流时会返回 HTTP 429）。邮件里中文下方附原文。设 `TRANSLATE=false` 可关闭。
+
+## AI 圈每日要闻
+
+工作流 `.github/workflows/ai-news.yml` 每天 08:00 运行：
+
+1. **抓取**过去 24 小时的内容（论文 48 小时）：
+   - 官方博客：OpenAI、Google DeepMind、Google AI、Hugging Face
+   - 媒体：TechCrunch AI、量子位
+   - 社区：Hacker News 上 80 分以上的 AI 相关帖子
+   - 论文：Hugging Face Daily Papers（带点赞数）
+
+   Anthropic 官网没有 RSS、机器之心 RSS 已下线、Reddit 拒绝脚本访问，所以没有收录。某个源挂了只会跳过它。
+2. **合并打分**：同一事件被多个来源报道会合并（按链接和标题相似度），按来源权重 + HN 分数 / 论文点赞 + 报道家数打分。
+3. **AI 挑选和总结**：把前 40 个事件交给 AI，选出最重要的 10 条，写中文标题、一句话摘要和「为什么值得关注」，并分为模型/产品发布、行业/公司动态、论文、开源/工具、社区热议。
+   - 配了 `ANTHROPIC_API_KEY` 先用 Claude，配了 `OPENAI_API_KEY` 用 ChatGPT；两个都配时一个失败会自动换另一个。
+   - 都没配或都失败时退回**规则排序**：按分数取前 10（每类最多 4 条），标题和简介用 Google 翻译成中文，没有点评。
+
+可选的 Actions **Variables**（Settings → Secrets and variables → Actions → Variables）：
+
+| Variable | 说明 |
+| --- | --- |
+| `AI_PROVIDER` | 设为 `openai` 则优先用 ChatGPT，默认优先 Claude |
+| `ANTHROPIC_MODEL` | 默认 `claude-sonnet-5-5` |
+| `OPENAI_MODEL` | 默认 `gpt-5-mini` |
+| `OPENAI_BASE_URL` | 默认 `https://api.openai.com/v1`。填其他兼容 OpenAI 接口的服务地址（如 DeepSeek、通义千问）也能用，`OPENAI_API_KEY` 和 `OPENAI_MODEL` 换成对应服务的 |
+
+数量用 `NEWS_COUNT` 调整，默认 10。
 
 ## 每日潜力股
 
@@ -61,6 +94,15 @@ npm test
 
 每只股票列出触发的推荐理由（带具体数字），如有超跌反弹、短线涨幅过大、估值偏高等情况会额外给出风险提示。
 
+**AI 选股**（可选）：配了 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`（与 AI 要闻共用，切换规则也一样）后，选股分两步：
+
+1. 量化规则按上面的过滤和打分初选 30 只（同一行业最多 2 只）。
+2. 把这 30 只的行情数据、量化理由和行业资金流向交给 AI，由 AI 综合资金持续性、量价配合、行业景气、估值和过热风险，**精选 10 只并排序**。
+
+推送里会多出 🤖 **AI 市场观察**（一段话总结当日盘面），每只股票下多一句 🤖 **AI 入选理由**，标题下注明「AI 从 30 只量化初选股中精选」。
+
+AI 只能从这 30 只里选，返回其他代码会被丢弃；它被要求只依据给它的数据、不编造新闻、不给买卖建议或目标价。AI 少选了会用量化排名补齐；没配 key 或 AI 调用失败时，直接用量化得分前 10，推送里注明「按量化得分选出」。
+
 可调整：`STOCK_COUNT`（数量，默认 10）、`STOCK_PUSH_TIME`（推送时间，默认 `09:20`）。筛选阈值和权重在 `src/stocks/screener.ts` 顶部。
 
 > ⚠️ 这是基于公开行情数据的规则化量化筛选，**不构成投资建议**。它只看资金与量价，不了解公司基本面和消息面，历史表现不代表未来。
@@ -69,8 +111,10 @@ npm test
 
 ```
 src/
-  tools/            两个任务共用：推送渠道 (Telegram/邮件)、HTML 转义、北京时间、重试
+  tools/            各任务共用：推送渠道 (Telegram/邮件)、Claude/ChatGPT 调用、翻译、HTML 处理、北京时间、重试
   github-trending/  GitHub 今日涨星：抓取、翻译、排版、入口 main.ts
+  ai-news/          AI 圈要闻：抓取、合并打分、AI 总结、排版、入口 main.ts
+    sources/        RSS、Hacker News、HF Daily Papers
   stocks/           每日潜力股：交易日历、筛选打分、排版、入口 main.ts
     sources/        行情数据源：东方财富、新浪 + 腾讯（备用）
 test/               与 src 同结构

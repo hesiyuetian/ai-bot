@@ -1,0 +1,36 @@
+name: AI 圈每日要闻推送
+
+on:
+  schedule:
+    # 每天 08:00 北京时间 (= 00:00 UTC)，汇总前一晚欧美的发布。Actions 定时任务可能延迟几分钟到几十分钟。
+    - cron: "0 0 * * *"
+  workflow_dispatch: # 支持在 Actions 页面手动点 "Run workflow" 测试
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: npm test
+      - run: npm run ai-news
+        env:
+          # 两个 key 都可以不配：都没有时按规则排序 + 翻译标题。
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # 可选，在 Settings → Secrets and variables → Actions → Variables 里配置。
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
