@@ -12,15 +12,17 @@ const DEFAULT_STOCK_COUNT = 10;
 /** The rule-screened candidates the AI chooses from. */
 const AI_POOL_SIZE = 30;
 const DEFAULT_PUSH_TIME = "09:20";
+/** The 9:15 call auction resets the day's numbers, so a screen started later would not run on the last close. */
+const SCREEN_DEADLINE = "09:15";
 const YEAR_LENGTH = 4;
 const MS_PER_SECOND = 1000;
 
 const isDryRun = process.argv.includes("--dry-run");
-const skipsCalendar = isDryRun || process.argv.includes("--force");
+const skipsSchedule = isDryRun || process.argv.includes("--force");
 
 /**
- * Actions starts the job early (cron delays are common), so the screen runs on the previous session's
- * close before the 9:15 call auction resets the numbers, then waits here until the push time.
+ * The job starts before the 9:15 call auction resets the numbers, so the screen runs on the previous
+ * session's close, then waits here until the push time.
  */
 const waitUntilPushTime = async (date: string): Promise<void> => {
   const delay = shanghaiInstant(date, env("STOCK_PUSH_TIME") ?? DEFAULT_PUSH_TIME).getTime() - Date.now();
@@ -31,8 +33,12 @@ const waitUntilPushTime = async (date: string): Promise<void> => {
 
 const main = async (): Promise<void> => {
   const date = shanghaiDate();
-  if (!skipsCalendar && !isTradingDay(date, await fetchOffDays(date.slice(0, YEAR_LENGTH)))) {
+  if (!skipsSchedule && !isTradingDay(date, await fetchOffDays(date.slice(0, YEAR_LENGTH)))) {
     console.log(`📅 ${date} 不是 A 股交易日，跳过推送`);
+    return;
+  }
+  if (!skipsSchedule && Date.now() >= shanghaiInstant(date, SCREEN_DEADLINE).getTime()) {
+    console.warn(`⚠️ 启动太晚（已过 ${SCREEN_DEADLINE} 集合竞价，当日数据已重置），今天跳过推送`);
     return;
   }
 

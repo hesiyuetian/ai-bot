@@ -1,0 +1,36 @@
+name: 检查是否已推送
+
+# 三个推送工作流共用：主触发 (cron-job.org) 和兜底 (Actions 定时任务) 会各运行一次，
+# 后运行的用它判断最近是否已经成功推送过，避免重复推送。
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: 要检查的工作流文件名，如 stocks.yml
+        type: string
+        required: true
+    outputs:
+      pushed:
+        value: ${{ jobs.check.outputs.pushed }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      pushed: ${{ steps.check.outputs.pushed }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ inputs.workflow }}
+        run: |
+          # 12 小时内成功结束的正式运行（运行名以「（定时）」结尾）都算已推送。
+          # 用 12 小时而不是自然日：兜底任务可能延迟到第二天凌晨，这时也应该跳过。
+          since=$(date -u -d "12 hours ago" +%Y-%m-%dT%H:%M:%SZ)
+          count=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$WORKFLOW" --status success --limit 20 \
+            --json displayTitle,createdAt \
+            --jq "[.[] | select((.displayTitle | endswith(\"（定时）\")) and .createdAt >= \"$since\")] | length")
+          if [ "$count" -gt 0 ]; then
+            echo "最近 12 小时已推送过，跳过"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi

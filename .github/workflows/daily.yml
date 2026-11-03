@@ -1,13 +1,40 @@
 name: GitHub 今日涨星推送
+# 正式推送的运行名带「（定时）」，防重复检查靠它区分测试运行。
+run-name: ${{ (github.event_name == 'schedule' || inputs.mode == 'scheduled') && 'GitHub 今日涨星推送（定时）' || 'GitHub 今日涨星推送（测试）' }}
 
 on:
+  # 主触发：cron-job.org 每天 22:00 调用 workflow_dispatch（mode=scheduled），准点运行。见 README。
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test：立即推送，不影响正式推送的防重复判断；scheduled：正式推送（cron-job.org 用这个）"
+        type: choice
+        options: [test, scheduled]
+        default: test
   schedule:
-    # 每天 22:00 北京时间 (= 14:00 UTC)。Actions 定时任务高峰期可能延迟几分钟到几十分钟。
-    - cron: "0 14 * * *"
-  workflow_dispatch: # 支持在 Actions 页面手动点 "Run workflow" 测试
+    # 兜底：每天 22:17 北京时间 (= 14:17 UTC)。Actions 定时任务偶尔会延迟几个小时，所以只作兜底；不选整点是因为整点最拥挤。
+    - cron: "17 14 * * *"
+
+# 主触发和兜底都会运行：排队依次执行，后运行的发现已推送就跳过。
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
+  check:
+    if: github.event_name == 'schedule' || inputs.mode == 'scheduled'
+    uses: ./.github/workflows/already-pushed.yml
+    with:
+      workflow: daily.yml
+
   push:
+    needs: check
+    # 测试运行时 check 被跳过，这里仍要运行。
+    if: ${{ !failure() && !cancelled() && needs.check.outputs.pushed != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

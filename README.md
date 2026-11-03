@@ -30,6 +30,29 @@ GitHub 没有 Trending 官方 API，所以脚本解析 Trending 页面（约 25 
 
 只配了 Telegram 或只配了邮箱也可以，没配的渠道会自动跳过。
 
+## 准点触发（cron-job.org）
+
+Actions 自带的定时任务不保证准点，高峰期可能延迟几个小时甚至被跳过，所以三个推送都由 [cron-job.org](https://cron-job.org)（免费）到点调 GitHub API 触发，几十秒内就会开始运行。自带的定时任务保留作兜底：
+
+| 工作流 | cron-job.org 触发（北京时间） | Actions 兜底 |
+| --- | --- | --- |
+| `daily.yml` GitHub 今日涨星 | 每天 22:00 | 22:17 |
+| `ai-news.yml` AI 圈每日要闻 | 每天 08:00 | 08:17 |
+| `stocks.yml` 每日潜力股 | 周一到周五 09:10（09:20 推送） | 08:37 |
+
+两边都会运行：同一工作流的运行会排队依次执行，后运行的发现 12 小时内已成功推送就跳过（判断逻辑在 `already-pushed.yml`）。
+
+配置一次即可：
+
+1. GitHub 头像 → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**：Repository access 只选本仓库，Permissions 里 **Actions** 选 **Read and write**，其他不给，有效期 1 年（到期前 GitHub 会邮件提醒）。三个任务共用这一个 token。
+2. 在 cron-job.org 注册后，按上表每个工作流 **Create cronjob** 一次：
+   - URL：`https://api.github.com/repos/<用户名>/<仓库名>/actions/workflows/<工作流文件名>/dispatches`
+   - Schedule：按上表时间，时区选 **Asia/Shanghai**
+   - Advanced：Request method 选 **POST**；Headers 加 `Authorization: Bearer <token>` 和 `Accept: application/vnd.github+json`；Request body 填 `{"ref":"main","inputs":{"mode":"scheduled"}}`
+3. 保存后点 **Test run**，返回 204 即成功，Actions 页面会出现一条以「（定时）」结尾的运行。
+
+在 Actions 页面手动点 **Run workflow** 默认是 `test` 模式：立即推送（潜力股还会跳过交易日判断），运行名以「（测试）」结尾，不影响正式推送的防重复判断。
+
 ## 本地运行
 
 需要 Node.js ≥ 22.18（原生运行 TypeScript，无需编译）。
@@ -46,7 +69,7 @@ npm test
 
 ## 可调整
 
-- 推送时间：改 `.github/workflows/daily.yml` 里的 cron（UTC 时间，北京时间减 8 小时）。
+- 推送时间：改 cron-job.org 上的任务时间，兜底时间改对应工作流里的 cron（UTC 时间，北京时间减 8 小时）。
 - 数量：加一个 `TOP_COUNT` 环境变量。
 - 翻译：英文说明默认用 Google 翻译成中文（免 key，失败时保留原文；被限流时会返回 HTTP 429）。邮件里中文下方附原文。设 `TRANSLATE=false` 可关闭。
 
@@ -79,7 +102,9 @@ npm test
 
 ## 每日潜力股
 
-工作流 `.github/workflows/stocks.yml` 周一到周五 08:30 启动，先判断今天是不是交易日（周末和法定节假日跳过，节假日数据来自 [holiday-cn](https://github.com/NateScarlet/holiday-cn)），再用上一交易日的收盘数据筛选，等到 09:20 推送。提前启动是因为 Actions 定时任务常有延迟，而且 09:15 集合竞价开始后行情接口的当日数据会被重置。
+工作流 `.github/workflows/stocks.yml` 每个工作日运行，先判断今天是不是交易日（周末和法定节假日跳过，节假日数据来自 [holiday-cn](https://github.com/NateScarlet/holiday-cn)），再用上一交易日的收盘数据筛选，等到 09:20 推送。必须在 09:15 前启动，因为集合竞价开始后行情接口的当日数据会被重置；晚于 09:15 启动会跳过当天推送。
+
+由 cron-job.org 在 09:10 准点触发（见上方「准点触发」），Actions 定时任务 08:37 兜底。
 
 **数据**：取上一交易日主力资金净流入最多的约 200 只 A 股（沪深主板、创业板、科创板、北交所），都是免 key 的公开接口，按顺序尝试：
 
@@ -122,6 +147,6 @@ test/               与 src 同结构
 
 ## 注意
 
-- GitHub 定时任务在高峰期可能延迟，且仓库 **60 天没有任何提交** 会自动停用定时任务，到时去 Actions 页面重新启用即可。
+- GitHub 定时任务不保证准点，高峰期可能延迟几个小时甚至被跳过（所以由 cron-job.org 准点触发，兜底任务也避开了整点）；另外仓库 **60 天没有任何提交** 会自动停用定时任务，到时去 Actions 页面重新启用即可。
 - 如果 GitHub 改了 Trending 页面结构导致解析不到数据，任务会失败，GitHub 会发邮件通知你。
 - 东方财富接口对同一 IP 的频繁请求会限流（直接断开连接），也常拒绝海外 IP，连不上时自动改用新浪 + 腾讯。本地调试时别连续狂跑。

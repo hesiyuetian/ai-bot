@@ -1,15 +1,41 @@
 name: 每日潜力股推送
+# 正式推送的运行名带「（定时）」，防重复检查靠它区分测试运行。
+run-name: ${{ (github.event_name == 'schedule' || inputs.mode == 'scheduled') && '每日潜力股推送（定时）' || '每日潜力股推送（测试）' }}
 
 on:
+  # 主触发：cron-job.org 每个工作日 09:10 调用 workflow_dispatch（mode=scheduled），准点运行。见 README。
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test：跳过交易日判断、立即推送；scheduled：判断交易日、09:20 推送（cron-job.org 用这个）"
+        type: choice
+        options: [test, scheduled]
+        default: test
   schedule:
-    # 周一到周五 08:30 北京时间 (= 00:30 UTC) 启动，脚本筛选完后等到 09:20 再推送。
-    # 提前启动是为了扛住 Actions 定时任务的延迟，并在 09:15 集合竞价开始前拿到上一交易日的完整数据。
-    # 节假日由脚本自动判断并跳过。
-    - cron: "30 0 * * 1-5"
-  workflow_dispatch: # 手动运行时跳过交易日判断、立即推送，方便测试
+    # 兜底：周一到周五 08:37 北京时间 (= 00:37 UTC)。Actions 定时任务偶尔会延迟几个小时，所以只作兜底；
+    # 不选整点是因为整点最拥挤。节假日由脚本自动判断并跳过。
+    - cron: "37 0 * * 1-5"
+
+# 主触发和兜底同一天都会运行：排队依次执行，后运行的发现已推送就跳过。
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
+  check:
+    if: github.event_name == 'schedule' || inputs.mode == 'scheduled'
+    uses: ./.github/workflows/already-pushed.yml
+    with:
+      workflow: stocks.yml
+
   push:
+    needs: check
+    # 测试运行时 check 被跳过，这里仍要运行。
+    if: ${{ !failure() && !cancelled() && needs.check.outputs.pushed != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -19,9 +45,9 @@ jobs:
           node-version: 22
       - run: npm install --omit=dev --no-audit --no-fund
       - run: npm test
-      - run: npm run stocks -- ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+      - run: npm run stocks -- ${{ (github.event_name == 'workflow_dispatch' && inputs.mode != 'scheduled') && '--force' || '' }}
         env:
-          STOCK_PUSH_TIME: ${{ github.event_name == 'workflow_dispatch' && '00:00' || '09:20' }}
+          STOCK_PUSH_TIME: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode != 'scheduled') && '00:00' || '09:20' }}
           # 可选：配了任意一个就由 AI 从量化初选的 30 只中精选 10 只并点评，都没配则按量化得分选。
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
