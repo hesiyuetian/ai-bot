@@ -3,7 +3,7 @@ name: 每日潜力股推送
 run-name: ${{ (github.event_name == 'schedule' || inputs.mode == 'scheduled') && '每日潜力股推送（定时）' || '每日潜力股推送（测试）' }}
 
 on:
-  # 主触发：cron-job.org 每个工作日 09:10 调用 workflow_dispatch（mode=scheduled），准点运行。见 README。
+  # 主触发：cron-job.org 每个工作日 09:00 调用 workflow_dispatch（mode=scheduled），准点运行。见 README。
   workflow_dispatch:
     inputs:
       mode:
@@ -12,9 +12,9 @@ on:
         options: [test, scheduled]
         default: test
   schedule:
-    # 兜底：周一到周五 08:37 北京时间 (= 00:37 UTC)。Actions 定时任务偶尔会延迟几个小时，所以只作兜底；
-    # 不选整点是因为整点最拥挤。节假日由脚本自动判断并跳过。
-    - cron: "37 0 * * 1-5"
+    # 兜底：周一到周五 09:10 北京时间 (= 01:10 UTC)。Actions 定时任务偶尔会延迟几个小时，所以只作兜底；
+    # 延迟到 09:15 之后才启动会跳过当天推送。不选整点是因为整点最拥挤。节假日由脚本自动判断并跳过。
+    - cron: "10 1 * * 1-5"
 
 # 主触发和兜底同一天都会运行：排队依次执行，后运行的发现已推送就跳过。
 concurrency:
