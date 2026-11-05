@@ -133,7 +133,7 @@ test("formatters escape HTML and carry reasons and the disclaimer", () => {
   assert.ok(telegram.includes("A&amp;B"));
   assert.ok(telegram.includes("• 主力资金净流入"));
   assert.ok(telegram.includes(DISCLAIMER));
-  assert.ok(toStockEmailHtml(picks, "2026/11/02", meta).includes("数据基于 20261030 收盘 · 来源 新浪财经 + 腾讯行情"));
+  assert.ok(toStockEmailHtml(picks, "2026/11/02", meta).includes("行情日期 20261030 · 来源 新浪财经 + 腾讯行情"));
 });
 
 test("trading days are weekdays that are not public holidays", () => {

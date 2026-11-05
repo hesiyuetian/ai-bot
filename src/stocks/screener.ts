@@ -5,6 +5,8 @@ export type Recommendation = {
   readonly score: number;
   readonly reasons: readonly string[];
   readonly risk?: string;
+  readonly screeningTier?: number;
+  readonly screeningNote?: string;
 };
 
 const YI = 100_000_000;
@@ -102,7 +104,10 @@ type Factor = {
 /** Ordered by importance; a pick lists the reasons that fired in this order. */
 const FACTORS: readonly Factor[] = [
   {
-    points: (quote) => Math.min(quote.mainNetPct, MAIN_NET_PCT_CAP) * MAIN_NET_POINTS_PER_PCT,
+    points: (quote) =>
+      Number.isFinite(quote.mainNetPct) && Number.isFinite(quote.mainNetInflow) && quote.mainNetInflow > 0
+        ? Math.min(quote.mainNetPct, MAIN_NET_PCT_CAP) * MAIN_NET_POINTS_PER_PCT
+        : 0,
     reason: (quote) => `主力资金净流入 ${yi(quote.mainNetInflow)} 亿元，占成交额 ${pct(quote.mainNetPct)}`,
   },
   {
@@ -110,21 +115,25 @@ const FACTORS: readonly Factor[] = [
     reason: (quote, rank) => `所属行业「${quote.industry}」主力净流入排名第 ${rank}，板块资金关注度高`,
   },
   {
-    points: (quote) => bandPoints(quote.volumeRatio, VOLUME_RATIO_BANDS),
+    points: (quote) =>
+      Number.isFinite(quote.amount) && quote.amount > 0 ? bandPoints(quote.volumeRatio, VOLUME_RATIO_BANDS) : 0,
     reason: (quote) =>
       `量比 ${quote.volumeRatio.toFixed(DECIMALS)}，${quote.volumeRatio >= VOLUME_RATIO_IDEAL_MIN ? "成交明显放大" : "成交温和放大"}`,
   },
   {
-    points: (quote) => bandPoints(quote.turnoverPct, TURNOVER_BANDS),
+    points: (quote) =>
+      Number.isFinite(quote.amount) && quote.amount > 0 ? bandPoints(quote.turnoverPct, TURNOVER_BANDS) : 0,
     reason: (quote) =>
       `换手率 ${pct(quote.turnoverPct)}，${between(quote.turnoverPct, TURNOVER_IDEAL_MIN, TURNOVER_IDEAL_MAX) ? "交投活跃" : "流动性尚可"}`,
   },
   {
-    points: (quote) => bandPoints(quote.changePct, CHANGE_BANDS),
+    points: (quote) => quote.changePct > 0 ? bandPoints(quote.changePct, CHANGE_BANDS) : 0,
     reason: (quote) => `最近交易日上涨 ${pct(quote.changePct)}，走势偏强但未涨停`,
   },
   {
-    points: (quote) => (quote.change60dPct > 0 && quote.change5dPct >= 0 ? TREND_POINTS : 0),
+    points: (quote) =>
+      Number.isFinite(quote.change60dPct) && Number.isFinite(quote.change5dPct) && quote.change60dPct > 0 && quote.change5dPct >= 0
+        ? TREND_POINTS : 0,
     reason: (quote) => `近 60 日涨 ${pct(quote.change60dPct)}、近 5 日涨 ${pct(quote.change5dPct)}，中短期趋势向上`,
   },
   {
@@ -178,7 +187,7 @@ export const isEligible = (quote: StockQuote): boolean =>
 const evaluate = (quote: StockQuote, industryRanks: ReadonlyMap<string, number>): Recommendation => {
   const rank = industryRanks.get(quote.industry);
   const scored = FACTORS.map((factor) => ({ factor, points: factor.points(quote, rank) })).filter(
-    ({ points }) => points > 0,
+    ({ points }) => Number.isFinite(points) && points > 0,
   );
   const risk = RISKS.find((candidate) => candidate.applies(quote))?.message(quote);
   return {
@@ -192,7 +201,7 @@ const evaluate = (quote: StockQuote, industryRanks: ReadonlyMap<string, number>)
 const rankIndustries = (industries: readonly IndustryFlow[]): Map<string, number> =>
   new Map(
     [...industries]
-      .filter((industry) => Number.isFinite(industry.mainNetInflow))
+      .filter((industry) => Number.isFinite(industry.mainNetInflow) && industry.mainNetInflow > 0)
       .sort((a, b) => b.mainNetInflow - a.mainNetInflow)
       .map((industry, index) => [industry.name, index + 1]),
   );
@@ -221,4 +230,107 @@ export const screenStocks = (
     .map((quote) => evaluate(quote, industryRanks))
     .sort((a, b) => b.score - a.score || b.quote.mainNetInflow - a.quote.mainNetInflow);
   return diversify(ranked, limit);
+};
+
+export type ScreeningResult = {
+  readonly picks: Recommendation[];
+  readonly note?: string;
+  /** Cumulative number selected after each attempted tier. */
+  readonly stages: readonly { readonly name: string; readonly count: number }[];
+};
+
+/** Keep identity, price, capitalization, daily change and profitability checks even for observation candidates. */
+const hasSafeCoreData = (quote: StockQuote): boolean =>
+  Boolean(quote.code && quote.name) &&
+  [quote.price, quote.marketCap, quote.changePct, quote.pe].every(Number.isFinite) &&
+  !RISK_NAME_PATTERN.test(quote.name) &&
+  !NEW_LISTING_NAME_PATTERN.test(quote.name) &&
+  !(listedDays(quote) < MIN_LISTED_DAYS) &&
+  quote.changePct < MAX_CHANGE_PCT &&
+  quote.pe > 0 &&
+  quote.pe <= 300;
+
+const isRelaxedEligible = (quote: StockQuote): boolean =>
+  hasSafeCoreData(quote) &&
+  hasCompleteData(quote) &&
+  quote.price >= 2 &&
+  quote.marketCap >= 2_000_000_000 &&
+  quote.amount >= 100_000_000 &&
+  Number.isFinite(quote.mainNetInflow) && quote.mainNetInflow > 0 &&
+  quote.changePct > -3 &&
+  !(quote.change5dPct > 35);
+
+const isObservationEligible = (quote: StockQuote): boolean =>
+  hasSafeCoreData(quote) &&
+  quote.price >= 1 &&
+  quote.marketCap >= 1_000_000_000 &&
+  (!Number.isFinite(quote.amount) || quote.amount >= 0) &&
+  quote.changePct > -5 &&
+  !(quote.change5dPct > 40);
+
+const screeningNote = (quote: StockQuote, tier: number): string => {
+  const reasons = [
+    ...(quote.mainNetInflow < 0 ? ["主力资金净流出"] : []),
+    ...(!Number.isFinite(quote.amount) || quote.amount === 0 ? ["无法验证昨日量能"] : []),
+    ...(!Number.isFinite(quote.mainNetInflow) || quote.mainNetInflow === 0 ? ["无法验证资金流入"] : []),
+    ...(!Number.isFinite(quote.volumeRatio) ? ["量比缺失"] : []),
+    ...(!Number.isFinite(quote.mainNetPct) ? ["资金占比缺失"] : []),
+    ...(!Number.isFinite(quote.turnoverPct) ? ["换手率缺失"] : []),
+    ...(quote.amount > 0 && quote.amount < MIN_AMOUNT ? ["成交额门槛放宽"] : []),
+    ...(quote.changePct <= 0 ? ["允许平盘或小跌"] : []),
+    ...(quote.price < MIN_PRICE ? ["股价门槛放宽"] : []),
+    ...(quote.marketCap < MIN_MARKET_CAP ? ["市值门槛放宽"] : []),
+    ...(quote.change5dPct > MAX_CHANGE_5D_PCT ? ["短期涨幅门槛放宽"] : []),
+    ...(quote.pe > MAX_PE ? ["估值门槛放宽"] : []),
+  ];
+  return `${tier === 1 ? "放宽筛选" : "观察候选"}：${reasons.slice(0, 2).join("、")}${reasons.length > 2 ? "等" : ""}`;
+};
+
+/** Preserve strict picks first; lower standards only as far as needed to reach minimumCount. */
+export const screenStocksWithFallback = (
+  quotes: readonly StockQuote[],
+  industries: readonly IndustryFlow[],
+  limit: number,
+  minimumCount = limit,
+): ScreeningResult => {
+  const capacity = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  const minimum = Number.isFinite(minimumCount) ? Math.min(capacity, Math.max(0, Math.floor(minimumCount))) : capacity;
+  const industryRanks = rankIndustries(industries);
+  const picks: Recommendation[] = [];
+  const codes = new Set<string>();
+  const perIndustry = new Map<string, number>();
+  const stages: { name: string; count: number }[] = [];
+  const tiers = [
+    { name: "严格筛选", eligible: isEligible },
+    { name: "放宽筛选", eligible: isRelaxedEligible },
+    { name: "观察候选", eligible: isObservationEligible },
+  ];
+
+  for (const [tier, stage] of tiers.entries()) {
+    if (tier > 0 && picks.length >= minimum) break;
+    const target = tier === 0 ? capacity : minimum;
+    const ranked = quotes
+      .filter((quote) => !codes.has(quote.code) && hasSafeCoreData(quote) && stage.eligible(quote))
+      .map((quote) => evaluate(quote, industryRanks))
+      .sort((a, b) => b.score - a.score ||
+        (Number.isFinite(b.quote.mainNetInflow) ? b.quote.mainNetInflow : 0) -
+        (Number.isFinite(a.quote.mainNetInflow) ? a.quote.mainNetInflow : 0));
+
+    for (const pick of ranked) {
+      const industry = pick.quote.industry;
+      if (picks.length >= target) break;
+      if (codes.has(pick.quote.code) || (industry && (perIndustry.get(industry) ?? 0) >= MAX_PER_INDUSTRY)) continue;
+      picks.push({ ...pick, screeningTier: tier, ...(tier > 0 ? { screeningNote: screeningNote(pick.quote, tier) } : {}) });
+      codes.add(pick.quote.code);
+      if (industry) perIndustry.set(industry, (perIndustry.get(industry) ?? 0) + 1);
+    }
+    stages.push({ name: stage.name, count: picks.length });
+  }
+
+  const relaxed = picks.filter((pick) => pick.screeningTier === 1).length;
+  const observation = picks.filter((pick) => pick.screeningTier === 2).length;
+  const note = relaxed || observation
+    ? `严格筛选不足，补充${relaxed ? `放宽筛选 ${relaxed} 只` : ""}${relaxed && observation ? "、" : ""}${observation ? `观察候选 ${observation} 只（部分量能/资金条件未满足或无法验证）` : ""}`
+    : undefined;
+  return { picks, ...(note ? { note } : {}), stages };
 };

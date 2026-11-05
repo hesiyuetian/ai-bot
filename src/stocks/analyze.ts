@@ -37,18 +37,20 @@ const SYSTEM_PROMPT = `你是一名严谨的 A 股市场分析师。量化规则
 1. 只能从给出的候选股票里选，用候选里的代码。
 2. 只依据用户提供的行情数据，以及公司主营业务等公开常识来分析；不编造新闻、公告、政策、业绩数字。
 3. 不给出买入/卖出建议、目标价或仓位建议，只做客观分析，可以指出风险。
+4. 优先选择严格筛选的股票；放宽筛选和观察候选仅用于补足。缺失数据表示无法验证，不可当作资金流入、放量或上涨的证据。
 只输出 JSON，不要输出任何其他文字。`;
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const fixed = (value: number, digits = DECIMALS): string => (Number.isFinite(value) ? value.toFixed(digits) : "-");
 
-const describeCandidate = ({ quote, reasons, risk, score }: Recommendation): string =>
+const describeCandidate = ({ quote, reasons, risk, score, screeningNote }: Recommendation): string =>
   [
     `- ${quote.code} ${quote.name}${quote.industry ? `（${quote.industry}）` : ""}，量化得分 ${fixed(score, 0)}`,
-    `  收盘 ${fixed(quote.price)}，涨幅 ${fixed(quote.changePct)}%，近 5 日 ${fixed(quote.change5dPct)}%，近 60 日 ${fixed(quote.change60dPct)}%`,
+    `  价格 ${fixed(quote.price)}，涨幅 ${fixed(quote.changePct)}%，近 5 日 ${fixed(quote.change5dPct)}%，近 60 日 ${fixed(quote.change60dPct)}%`,
     `  主力净流入 ${fixed(quote.mainNetInflow / YI)} 亿（占成交额 ${fixed(quote.mainNetPct)}%），量比 ${fixed(quote.volumeRatio)}，换手率 ${fixed(quote.turnoverPct)}%`,
     `  市盈率 ${fixed(quote.pe, PE_DECIMALS)}，总市值 ${fixed(quote.marketCap / YI, 0)} 亿`,
     `  量化理由：${reasons.join("；")}`,
+    ...(screeningNote ? [`  筛选条件：${screeningNote}`] : []),
     ...(risk ? [`  量化风险提示：${risk}`] : []),
   ].join("\n");
 
@@ -67,11 +69,11 @@ export const buildSelectionPrompt = (
   limit: number,
 ): string => {
   const sectors = describeIndustries(industries);
-  return `以下是 ${tradeDate} 收盘后，量化规则（主力资金、量价、行业热度、估值）初选出的 ${pool.length} 只候选股票，按量化得分从高到低排列：
+  return `以下是行情日期 ${tradeDate || "未知"} 的快照中，量化规则（主力资金、量价、行业热度、估值）初选出的 ${pool.length} 只候选股票，按筛选档位优先、同档量化得分从高到低排列：
 
 ${pool.map(describeCandidate).join("\n\n")}
 ${sectors ? `\n当日主力资金净流入前 ${TOP_INDUSTRIES} 的行业：\n${sectors}\n` : ""}
-请从中精选 ${limit} 只最值得关注的股票，按推荐程度从高到低排列。输出：
+请从中精选 ${Math.min(limit, pool.length)} 只最值得关注的股票，按推荐程度从高到低排列。输出：
 - market：结合行业资金流向和候选股票的共性，写一段今日市场观察（不超过 100 字）
 - picks：选中的股票，每只给出 code 和 reason（为什么选它、需要注意什么，不超过 60 字）
 
@@ -114,7 +116,9 @@ export const parseSelection = (
   const chosen = [...byCode.keys()].flatMap((code) => pool.filter((candidate) => candidate.quote.code === code));
   const topUp = pool.filter((candidate) => !byCode.has(candidate.quote.code)).slice(0, wanted - chosen.length);
   const market = typeof answer.market === "string" ? truncate(answer.market.trim(), MAX_MARKET_CHARS) : "";
-  return { picks: [...chosen, ...topUp], market, byCode };
+  // The AI may reorder candidates within a tier, but a relaxed pick must not outrank a strict one.
+  const picks = [...chosen, ...topUp].sort((a, b) => (a.screeningTier ?? 0) - (b.screeningTier ?? 0));
+  return { picks, market, byCode };
 };
 
 /**

@@ -15,19 +15,28 @@ const SOURCES: readonly Source[] = [
   { name: "新浪财经 + 腾讯行情", fetch: fetchSinaTencentSnapshot },
 ];
 
-const fetchFirstAvailable = async (sources: readonly Source[], failures: readonly string[]): Promise<MarketSnapshot> => {
+type ValidateSnapshot = (snapshot: MarketSnapshot) => void;
+
+const fetchFirstAvailable = async (
+  sources: readonly Source[],
+  failures: readonly string[],
+  validate?: ValidateSnapshot,
+): Promise<MarketSnapshot> => {
   const [source, ...fallbacks] = sources;
   if (!source) throw new Error(`所有行情数据源都请求失败:\n${failures.join("\n")}`);
   try {
     const snapshot = await source.fetch();
     if (snapshot.quotes.length === 0) throw new Error("没有返回任何股票");
+    // A nonempty response can still contain only unusable pre-market quotes.
+    validate?.(snapshot);
     return snapshot;
   } catch (error: unknown) {
     const failure = `${source.name}: ${describeError(error)}`;
     console.warn(`⚠️ ${failure}${fallbacks.length > 0 ? "，改用备用数据源" : ""}`);
-    return fetchFirstAvailable(fallbacks, [...failures, failure]);
+    return fetchFirstAvailable(fallbacks, [...failures, failure], validate);
   }
 };
 
 /** Market data from the first source that answers. */
-export const fetchMarketSnapshot = (): Promise<MarketSnapshot> => fetchFirstAvailable(SOURCES, []);
+export const fetchMarketSnapshot = (validate?: ValidateSnapshot): Promise<MarketSnapshot> =>
+  fetchFirstAvailable(SOURCES, [], validate);
